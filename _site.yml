@@ -1,0 +1,9 @@
+name: "grupo-interaval"
+output_dir: "." 
+navbar:
+  title: "Grupo Interaval"
+  left:
+    - text: "Inicio"
+      href: index.html
+    - text: "Nosotros"
+      href: about.html

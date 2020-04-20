@@ -1,0 +1,2511 @@
+---
+title: "Grupo Interaval"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    logo: logo.png
+---
+                   
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(dygraphs)
+library(xts)
+library(readr)
+library(readxl)
+library(zoo)
+library(dplyr)
+library(magrittr)
+library(highcharter)
+
+#######################################################################################################################
+datos_accion <-function(accion, directorio, nombre){
+  
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  
+  
+  #abca=datos_accion(abca,paste(directorio,"abc.a.txt",sep=""),"ABC.A") C:/Users/analista04/Documents/R/grupointeraval.github.io/ 
+  #"C:/Users/analista04/Documents/R/grupointeraval.github.io/abc.a.txt"
+  #AL ACTUALIZAR ESTA FUNCION ACTUALIZAR EN EL HTML
+  
+   
+  accion <- read_delim(directorio, 
+                       "|", escape_double = FALSE, col_names = FALSE, 
+                       col_types = cols(X1 = col_skip(), X11 = col_skip(), 
+                                        X2 = col_datetime(format = "%d/%m/%Y ")), 
+                       locale = locale(decimal_mark = ",", grouping_mark = "."), 
+                       trim_ws = TRUE)
+
+
+  accion=as.data.frame(accion)
+  colnames(accion)<-c("Fecha","Tipo.de.operacion",paste(nombre,".Open",sep=""),paste(nombre,".Close",sep=""),
+                      paste(nombre,".High",sep=""),paste(nombre,".Low",sep=""),
+                      ".Cantidad.de.Operaciones",paste(nombre,".Volume",sep=""),".Monto.Efectivo")
+  
+  accion=accion[c("Fecha", paste(nombre,".Open",sep=""), paste(nombre,".High",sep=""), 
+                  paste(nombre,".Low",sep=""), paste(nombre,".Close",sep=""), paste(nombre,".Volume",sep=""), 
+                  ".Cantidad.de.Operaciones", ".Monto.Efectivo", "Tipo.de.operacion") ]
+  ##REVISADO
+  
+  fecha_reconversion=as.Date("2018-08-18", format="%Y-%m-%d")
+  accion=subset(accion, 
+  accion$Tipo.de.operacion=="R"&(accion[,3]>0&accion[,4]>0))
+  
+  if (nombre=="BVCC")
+  {
+    accion=accion[-c(1,2,3,4),]
+  }
+  
+  accion_nominal=accion
+  i=1
+  
+  while (accion[i,1]<=fecha_reconversion)
+  {
+    accion[i,2]=accion[i,2]/100000
+    accion[i,3]=accion[i,3]/100000
+    accion[i,4]=accion[i,4]/100000
+    accion[i,5]=accion[i,5]/100000
+    accion[i,8]=accion[i,8]/100000
+    i=i+1
+  }
+  
+  rm(i)
+  
+  serie_accion=xts(accion[,2:8], accion$Fecha)
+  
+  url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+  destfile <- "dolartoday.xlsx" #
+  curl::curl_download(url, destfile)#
+  dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+  
+  dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+  
+  colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+  
+  dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+  
+  #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+  
+  dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+  dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+  
+  serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+  
+  #REVISADO##############################################################################################################
+  
+  inflacion_diaria <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/3_inflacion_diaria.xlsx", 
+                                 col_types = c("date", "numeric"))
+  inflacion_diaria=as.data.frame(inflacion_diaria)
+  
+  fechas_cotizaciones=as.Date(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion$Fecha)))
+  
+  fechas_cotizaciones_inflacion=as.Date(intersect(as.Date(inflacion_diaria$Fecha),as.Date(accion$Fecha)))
+  
+  accion_usd=accion_nominal[as.Date(accion_nominal$Fecha) %in% fechas_cotizaciones, ]
+  
+  accion_inflacion_bs=accion[as.Date(accion$Fecha) %in% fechas_cotizaciones_inflacion, ]
+  
+  
+  for (i in 1:nrow(as.data.frame(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion_nominal$Fecha))))) {
+    
+    s=accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]
+    r=as.numeric(dolarparalelo[as.Date(dolarparalelo$Fecha)==fechas_cotizaciones[i],2])
+    
+    accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]=s/r
+    
+  }
+  
+  serie_accion_usd=xts(accion_usd[,2:6], accion_usd$Fecha)
+  
+  x=accion_inflacion_bs[1,5]
+  for (i in 1:nrow(as.data.frame(accion_inflacion_bs[,5])))
+  {
+    
+    accion_inflacion_bs[,5]=x*(1+as.numeric(accion_inflacion_bs[i,5]))
+  } 
+  
+  serie_accion_inflacion_bs=xts(accion_inflacion_bs[,2:6], as.Date(accion_inflacion_bs$Fecha))
+  
+  #Highchart Bs.S
+    grafico_bs=highchart(type = "stock") %>% 
+    hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+    hc_add_series(serie_accion[,1:4], yAxis = 0, name = nombre) %>% 
+    hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+  
+  #Highchart USD
+    grafico_usd=highchart(type = "stock") %>%  
+    hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+    hc_add_series(serie_accion_usd[,1:4], yAxis = 0, name = nombre) %>%  
+    hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+  
+    #Highchart Inflación
+    grafico_inflacion=hchart(serie_accion_inflacion_bs)
+    
+  #Dygraph Bs.
+  #grafico_bs=dygraph(serie_accion[2:5], main=nombre) %>% dyCandlestick() %>% 
+  #dyAxis("y", label = "Bs.") %>%
+  #dyRangeSelector() 
+  
+  
+  #Dygraph USD
+  #grafico_usd=dygraph(serie_accion_usd[2:5],main=nombre) %>% dyCandlestick() %>% 
+  #dyAxis("y", label = "USD") %>%
+  #dyRangeSelector() 
+  
+
+  precio_actual=accion[nrow(accion),5]
+  
+  datos <- list("grafico_bs" = grafico_bs, "grafico_usd"=grafico_usd,"accion_usd"=accion_usd,
+                "accion_bs"=accion, "precio"=precio_actual,"grafico_inflacion"=grafico_inflacion, "serie"=serie_accion_usd)
+  
+  return(datos)
+  
+}
+
+#######################################################################################################################
+
+datos_dolar <- function(){
+  
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  
+  url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+  destfile <- "dolartoday.xlsx" #
+  curl::curl_download(url, destfile)#
+  dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+  
+  dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+  
+  colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+  
+  dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+  
+  #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+  
+  dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+  dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+  dolar_paralelo=dolarparalelo[,3]
+  
+  serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+  
+  #Dygraph
+  #grafico_dolar_paralelo=dygraph(serie_dolar_paralelo,main="Dolar Paralelo") %% 
+  #dyAxis(y, label = USDVES) %%
+  #dyRangeSelector(dateWindow = c(2019-01-01, 2019-10-01)) 
+  
+  #Highchart Bs.S
+  grafico_dolar_paralelo=hchart(serie_dolar_paralelo, name = "USD/Bs.")
+  
+  
+  precio_actual=dolar_paralelo[nrow(as.data.frame(dolar_paralelo))]
+  
+  datos=list("grafico"=grafico_dolar_paralelo,"dolar"=dolar_paralelo,"serie"=serie_dolar_paralelo, 
+             "precio"=precio_actual)
+  
+  return(datos)
+  
+}
+
+#######################################################################################################################
+
+datos_inflacion <-function(directorio_archivo_1,directorio_archivo_2){
+  
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  
+  inflacion_mensual= read_excel(directorio_archivo_1, col_types = c("date", "numeric"))
+  inflacion_diaria = read_excel(directorio_archivo_2, col_types = c("date", "numeric"))
+  
+  
+  #Construccion de serie de inflacion mensual
+  serie_inflacion_mensual=xts(inflacion_mensual[,2], inflacion_mensual$Fecha)
+  
+  #Construccion de serie de inflacion diaria
+  serie_inflacion_diaria=xts(inflacion_diaria[,2], inflacion_diaria$Fecha)
+  
+  #Highchart 
+  grafico_inflacion_mensual=hchart(serie_inflacion_mensual)
+  
+  
+  #Dygraph
+  #grafico_inflacion_mensual=dygraph(serie_inflacion_mensual,main="InflaciÃ³n Mensual") %% 
+  #dyAxis(y, label = Bs.) %%
+  #dyRangeSelector() 
+  
+  return(grafico_inflacion_mensual)
+  
+}
+
+#######################################################################################################################
+
+capitalizacion_de_mercado <-function(directorio){
+  library(formattable)
+  datos_accion <-function(accion, directorio, nombre){
+    
+    library(dygraphs)
+    library(xts)
+    library(readr)
+    library(readxl)
+    library(zoo)
+    library(dplyr)
+    library(magrittr)
+    library(highcharter)
+    
+    
+    #abca=datos_accion(abca,paste(directorio,"abc.a.txt",sep=""),"ABC.A") C:/Users/analista04/Documents/R/grupointeraval.github.io/ 
+    #"C:/Users/analista04/Documents/R/grupointeraval.github.io/abc.a.txt"
+    #AL ACTUALIZAR ESTA FUNCION ACTUALIZAR EN EL HTML
+    
+    
+    accion <- read_delim(directorio, 
+                         "|", escape_double = FALSE, col_names = FALSE, 
+                         col_types = cols(X1 = col_skip(), X11 = col_skip(), 
+                                          X2 = col_datetime(format = "%d/%m/%Y ")), 
+                         locale = locale(decimal_mark = ",", grouping_mark = "."), 
+                         trim_ws = TRUE)
+    
+    
+    accion=as.data.frame(accion)
+    colnames(accion)<-c("Fecha","Tipo.de.operacion",paste(nombre,".Open",sep=""),paste(nombre,".Close",sep=""),
+                        paste(nombre,".High",sep=""),paste(nombre,".Low",sep=""),
+                        ".Cantidad.de.Operaciones",paste(nombre,".Volume",sep=""),".Monto.Efectivo")
+    
+    accion=accion[c("Fecha", paste(nombre,".Open",sep=""), paste(nombre,".High",sep=""), 
+                    paste(nombre,".Low",sep=""), paste(nombre,".Close",sep=""), paste(nombre,".Volume",sep=""), 
+                    ".Cantidad.de.Operaciones", ".Monto.Efectivo", "Tipo.de.operacion") ]
+    ##REVISADO
+    
+    fecha_reconversion=as.Date("2018-08-18", format="%Y-%m-%d")
+    accion=subset(accion, 
+                  accion$Tipo.de.operacion=="R"&(accion[,3]>0&accion[,4]>0))
+    
+    if (nombre=="BVCC")
+    {
+      accion=accion[-c(1,2,3,4),]
+    }
+    
+    accion_nominal=accion
+    i=1
+    
+    while (accion[i,1]<=fecha_reconversion)
+    {
+      accion[i,2]=accion[i,2]/100000
+      accion[i,3]=accion[i,3]/100000
+      accion[i,4]=accion[i,4]/100000
+      accion[i,5]=accion[i,5]/100000
+      accion[i,8]=accion[i,8]/100000
+      i=i+1
+    }
+    
+    rm(i)
+    
+    serie_accion=xts(accion[,2:8], accion$Fecha)
+    
+    url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+    destfile <- "dolartoday.xlsx" #
+    curl::curl_download(url, destfile)#
+    dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+    
+    dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+    
+    colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+    
+    dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+    
+    #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+    
+    dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+    dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+    
+    serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+    
+    #REVISADO##############################################################################################################
+    
+    inflacion_diaria <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/3_inflacion_diaria.xlsx", 
+                                   col_types = c("date", "numeric"))
+    inflacion_diaria=as.data.frame(inflacion_diaria)
+    
+    fechas_cotizaciones=as.Date(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion$Fecha)))
+    
+    fechas_cotizaciones_inflacion=as.Date(intersect(as.Date(inflacion_diaria$Fecha),as.Date(accion$Fecha)))
+    
+    accion_usd=accion_nominal[as.Date(accion_nominal$Fecha) %in% fechas_cotizaciones, ]
+    
+    accion_inflacion_bs=accion[as.Date(accion$Fecha) %in% fechas_cotizaciones_inflacion, ]
+    
+    
+    for (i in 1:nrow(as.data.frame(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion_nominal$Fecha))))) {
+      
+      s=accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]
+      r=as.numeric(dolarparalelo[as.Date(dolarparalelo$Fecha)==fechas_cotizaciones[i],2])
+      
+      accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]=s/r
+      
+    }
+    
+    serie_accion_usd=xts(accion_usd[,2:6], accion_usd$Fecha)
+    
+    x=accion_inflacion_bs[1,5]
+    for (i in 1:nrow(as.data.frame(accion_inflacion_bs[,5])))
+    {
+      
+      accion_inflacion_bs[,5]=x*(1+as.numeric(accion_inflacion_bs[i,5]))
+    } 
+    
+    serie_accion_inflacion_bs=xts(accion_inflacion_bs[,2:6], as.Date(accion_inflacion_bs$Fecha))
+    
+    #Highchart Bs.S
+    grafico_bs=highchart(type = "stock") %>% 
+      hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+      hc_add_series(serie_accion[,1:4], yAxis = 0, name = nombre) %>% 
+      hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+    
+    #Highchart USD
+    grafico_usd=highchart(type = "stock") %>%  
+      hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+      hc_add_series(serie_accion_usd[,1:4], yAxis = 0, name = nombre) %>%  
+      hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+    
+    #Highchart Inflación
+    grafico_inflacion=hchart(serie_accion_inflacion_bs)
+    
+    #Dygraph Bs.
+    #grafico_bs=dygraph(serie_accion[2:5], main=nombre) %>% dyCandlestick() %>% 
+    #dyAxis("y", label = "Bs.") %>%
+    #dyRangeSelector() 
+    
+    
+    #Dygraph USD
+    #grafico_usd=dygraph(serie_accion_usd[2:5],main=nombre) %>% dyCandlestick() %>% 
+    #dyAxis("y", label = "USD") %>%
+    #dyRangeSelector() 
+    
+    
+    precio_actual=accion[nrow(accion),5]
+    
+    datos <- list("grafico_bs" = grafico_bs, "grafico_usd"=grafico_usd,"accion_usd"=accion_usd,
+                  "accion_bs"=accion, "precio"=precio_actual,"grafico_inflacion"=grafico_inflacion, "serie"=serie_accion_usd)
+    
+    return(datos)
+    
+  }
+  
+  datos_dolar <- function(){
+    
+    library(dygraphs)
+    library(xts)
+    library(readr)
+    library(readxl)
+    library(zoo)
+    library(dplyr)
+    library(magrittr)
+    library(highcharter)
+    
+    url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+    destfile <- "dolartoday.xlsx" #
+    curl::curl_download(url, destfile)#
+    dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+    
+    dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+    
+    colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+    
+    dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+    
+    #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+    
+    dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+    dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+    dolar_paralelo=dolarparalelo[,3]
+    
+    serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+    
+    #Dygraph
+    #grafico_dolar_paralelo=dygraph(serie_dolar_paralelo,main="Dolar Paralelo") %% 
+    #dyAxis(y, label = USDVES) %%
+    #dyRangeSelector(dateWindow = c(2019-01-01, 2019-10-01)) 
+    
+    #Highchart Bs.S
+    grafico_dolar_paralelo=hchart(serie_dolar_paralelo, name = "USD/Bs.")
+    
+    
+    precio_actual=dolar_paralelo[nrow(as.data.frame(dolar_paralelo))]
+    
+    datos=list("grafico"=grafico_dolar_paralelo,"dolar"=dolar_paralelo,"serie"=serie_dolar_paralelo, 
+               "precio"=precio_actual)
+    
+    return(datos)
+    
+  }
+  
+##########################################################################################################################################
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  library(knitr)
+  library(kableExtra)
+  library(formattable)
+  #directorio="C:/Users/Alejandro/Desktop/diario20190904.dat"
+  diario <- read_delim(directorio, 
+                       "|", escape_double = FALSE, col_names = FALSE, 
+                       trim_ws = TRUE)
+  diario=as.data.frame(diario)
+  diario[,2]=NULL
+  
+  
+  i=4
+  while (diario[i,1]!="P")
+  {
+    i=i+1
+  }
+  r=i-1
+  
+  diario_acciones=diario[4:r,]
+  diario_acciones[,1]=NULL
+  colnames(diario_acciones)<-c("Acción","Apertura","Cierre","Variación Absoluta","Variación Relativa","Mínimo","Máximo","Promedio")
+  
+  acciones_en_circulacion=data.frame(
+    acciones = c ("ABC.A","BNC","BOU","BPV","BVCC","BVL","CCR","CGQ","CIE","CRM.A","DOM", "EFE","ENV","FNC", 
+                  "FVI.A", "FVI.B","GZL","IVC","MPA","MVZ.A","MVZ.B","PGR","PTN","RST","SVS","TDV.D","TPG"),
+    
+    numero_de_acciones=c( 89166667,
+                   5791930372,
+                   23796748346,
+                   107827475,
+                   29250000,
+                   3647133702,
+                   2834081,
+                   91196788,
+                   485560500,
+                   150000000,
+                   24062500,
+                   700000000,
+                   126923808,
+                   81081000,
+                   1730129521,
+                   10615414833,
+                   24251124,
+                   111025339,
+                   229410000,
+                   60880929,
+                   43880032,
+                   732317516,
+                   152986904,
+                   285642388,
+                   52524376,
+                   26121595,
+                   1188344665)
+    
+    
+    
+  )
+  
+  dolar=datos_dolar()
+  
+  for (i in 1:nrow(diario_acciones)) {
+   diario_acciones$capitalizacion_bs[i]=
+     acciones_en_circulacion[which(acciones_en_circulacion$accion == diario_acciones$accion[i]),2]* diario_acciones$cierre[i]
+   diario_acciones$capitalizacion_usd[i]=diario_acciones$capitalizacion_bs[i]/dolar$precio
+  }
+ 
+   diario_acciones[,9]=diario_acciones[,3]/dolar$precio
+  colnames(diario_acciones)<-c("Acción","Apertura","Cierre Bs.","Variación Absoluta","Variación Relativa","Mínimo","Máximo","Promedio","Cierre $USD")
+  
+  diario_acciones[,2]=accounting(diario_acciones[,2])
+  diario_acciones[,3]=accounting(diario_acciones[,3])
+  diario_acciones[,4]=accounting(diario_acciones[,4])
+  diario_acciones[,5]=accounting(diario_acciones[,5])
+  diario_acciones[,6]=accounting(diario_acciones[,6])
+  diario_acciones[,7]=accounting(diario_acciones[,7])
+  diario_acciones[,8]=accounting(diario_acciones[,8])
+  diario_acciones[,9]=accounting(diario_acciones[,9])
+  
+  diario_acciones=diario_acciones[order(diario_acciones[,3], decreasing = TRUE),]
+    row.names(diario_acciones) <- NULL
+    
+    diario_acciones=diario_acciones[c("Acción","Apertura","Cierre Bs.","Cierre $USD","Variación Absoluta","Variación Relativa","Mínimo","Máximo","Promedio")]
+    resumen_de_mercado=kable(diario_acciones) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  
+  
+  return(resumen_de_mercado)
+  
+}
+
+#######################################################################################################################
+
+m2 <- function(){
+
+library(readxl)
+liquidez <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/liquidez.xlsx", 
+                       col_types = c("date", "numeric", "numeric"))
+liquidez=as.data.frame(liquidez)
+liquidez=liquidez[2:nrow(liquidez),]
+
+library(dygraphs)
+library(xts)
+library(readr)
+library(readxl)
+library(zoo)
+library(dplyr)
+library(magrittr)
+library(highcharter)
+
+m2=liquidez[,2]
+serie_m2=xts(liquidez[,3], as.Date(liquidez$fecha))
+
+grafico_m2=hchart(serie_m2, name = "% Var. M2")
+
+datos=list("grafico"=grafico_m2,"liquidez_m2"=m2,"serie_m2"=serie_m2)
+
+
+return(datos)
+
+}
+
+#######################################################################################################################
+
+capital <-function(){
+  library(formattable)
+  
+  datos_dolar <- function(){
+    
+    library(dygraphs)
+    library(xts)
+    library(readr)
+    library(readxl)
+    library(zoo)
+    library(dplyr)
+    library(magrittr)
+    library(highcharter)
+    
+    url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+    destfile <- "dolartoday.xlsx" #
+    curl::curl_download(url, destfile)#
+    dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+    
+    dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+    
+    colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+    
+    dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+    
+    #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+    
+    dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+    dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+    dolar_paralelo=dolarparalelo[,3]
+    
+    serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+    
+    #Dygraph
+    #grafico_dolar_paralelo=dygraph(serie_dolar_paralelo,main="Dolar Paralelo") %% 
+    #dyAxis(y, label = USDVES) %%
+    #dyRangeSelector(dateWindow = c(2019-01-01, 2019-10-01)) 
+    
+    #Highchart Bs.S
+    grafico_dolar_paralelo=hchart(serie_dolar_paralelo, name = "USD/Bs.")
+    
+    
+    precio_actual=dolar_paralelo[nrow(as.data.frame(dolar_paralelo))]
+    
+    datos=list("grafico"=grafico_dolar_paralelo,"dolar"=dolar_paralelo,"serie"=serie_dolar_paralelo, 
+               "precio"=precio_actual)
+    
+    return(datos)
+    
+  }
+  
+  datos_accion <-function(accion, directorio, nombre){
+    
+    library(dygraphs)
+    library(xts)
+    library(readr)
+    library(readxl)
+    library(zoo)
+    library(dplyr)
+    library(magrittr)
+    library(highcharter)
+    
+    
+    #abca=datos_accion(abca,paste(directorio,"abc.a.txt",sep=""),"ABC.A") C:/Users/analista04/Documents/R/grupointeraval.github.io/ 
+    #"C:/Users/analista04/Documents/R/grupointeraval.github.io/abc.a.txt"
+    #AL ACTUALIZAR ESTA FUNCION ACTUALIZAR EN EL HTML
+    
+    
+    accion <- read_delim(directorio, 
+                         "|", escape_double = FALSE, col_names = FALSE, 
+                         col_types = cols(X1 = col_skip(), X11 = col_skip(), 
+                                          X2 = col_datetime(format = "%d/%m/%Y ")), 
+                         locale = locale(decimal_mark = ",", grouping_mark = "."), 
+                         trim_ws = TRUE)
+    
+    
+    accion=as.data.frame(accion)
+    colnames(accion)<-c("Fecha","Tipo.de.operacion",paste(nombre,".Open",sep=""),paste(nombre,".Close",sep=""),
+                        paste(nombre,".High",sep=""),paste(nombre,".Low",sep=""),
+                        ".Cantidad.de.Operaciones",paste(nombre,".Volume",sep=""),".Monto.Efectivo")
+    
+    accion=accion[c("Fecha", paste(nombre,".Open",sep=""), paste(nombre,".High",sep=""), 
+                    paste(nombre,".Low",sep=""), paste(nombre,".Close",sep=""), paste(nombre,".Volume",sep=""), 
+                    ".Cantidad.de.Operaciones", ".Monto.Efectivo", "Tipo.de.operacion") ]
+    ##REVISADO
+    
+    fecha_reconversion=as.Date("2018-08-18", format="%Y-%m-%d")
+    accion=subset(accion, 
+                  accion$Tipo.de.operacion=="R"&(accion[,3]>0&accion[,4]>0))
+    
+    if (nombre=="BVCC")
+    {
+      accion[-c(1,2,3,4),]
+    }
+    
+    accion_nominal=accion
+    i=1
+    
+    while (accion[i,1]<=fecha_reconversion)
+    {
+      accion[i,2]=accion[i,2]/100000
+      accion[i,3]=accion[i,3]/100000
+      accion[i,4]=accion[i,4]/100000
+      accion[i,5]=accion[i,5]/100000
+      accion[i,8]=accion[i,8]/100000
+      i=i+1
+    }
+    
+    rm(i)
+    
+    serie_accion=xts(accion[,2:8], accion$Fecha)
+    
+    url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+    destfile <- "dolartoday.xlsx" #
+    curl::curl_download(url, destfile)#
+    dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+    
+    dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+    
+    colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+    
+    dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+    
+    #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+    
+    dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+    dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+    
+    serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+    
+    #REVISADO##############################################################################################################
+    
+    inflacion_diaria <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/3_inflacion_diaria.xlsx", 
+                                   col_types = c("date", "numeric"))
+    inflacion_diaria=as.data.frame(inflacion_diaria)
+    
+    fechas_cotizaciones=as.Date(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion$Fecha)))
+    
+    fechas_cotizaciones_inflacion=as.Date(intersect(as.Date(inflacion_diaria$Fecha),as.Date(accion$Fecha)))
+    
+    accion_usd=accion_nominal[as.Date(accion_nominal$Fecha) %in% fechas_cotizaciones, ]
+    
+    accion_inflacion_bs=accion[as.Date(accion$Fecha) %in% fechas_cotizaciones_inflacion, ]
+    
+    
+    for (i in 1:nrow(as.data.frame(intersect(as.Date(dolarparalelo$Fecha),as.Date(accion_nominal$Fecha))))) {
+      
+      s=accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]
+      r=as.numeric(dolarparalelo[as.Date(dolarparalelo$Fecha)==fechas_cotizaciones[i],2])
+      
+      accion_usd[accion_usd$Fecha==fechas_cotizaciones[i],2:7]=s/r
+      
+    }
+    
+    serie_accion_usd=xts(accion_usd[,2:6], accion_usd$Fecha)
+    
+    x=accion_inflacion_bs[1,5]
+    for (i in 1:nrow(as.data.frame(accion_inflacion_bs[,5])))
+    {
+      
+      accion_inflacion_bs[,5]=x*(1+as.numeric(accion_inflacion_bs[i,5]))
+    } 
+    
+    serie_accion_inflacion_bs=xts(accion_inflacion_bs[,2:6], as.Date(accion_inflacion_bs$Fecha))
+    
+    #Highchart Bs.S
+    grafico_bs=highchart(type = "stock") %>% 
+      hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+      hc_add_series(serie_accion[,1:4], yAxis = 0, name = nombre) %>% 
+      hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+    
+    #Highchart USD
+    grafico_usd=highchart(type = "stock") %>%  
+      hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) %>% 
+      hc_add_series(serie_accion_usd[,1:4], yAxis = 0, name = nombre) %>%  
+      hc_add_series(serie_accion[,5], color = "gray", yAxis = 1, name = "Volumen", type = "column")  
+    
+    #Highchart Inflación
+    grafico_inflacion=hchart(serie_accion_inflacion_bs)
+    
+    #Dygraph Bs.
+    #grafico_bs=dygraph(serie_accion[2:5], main=nombre) %>% dyCandlestick() %>% 
+    #dyAxis("y", label = "Bs.") %>%
+    #dyRangeSelector() 
+    
+    
+    #Dygraph USD
+    #grafico_usd=dygraph(serie_accion_usd[2:5],main=nombre) %>% dyCandlestick() %>% 
+    #dyAxis("y", label = "USD") %>%
+    #dyRangeSelector() 
+    
+    
+    precio_actual=accion[nrow(accion),5]
+    
+    datos <- list("grafico_bs" = grafico_bs, "grafico_usd"=grafico_usd,"accion_usd"=accion_usd,
+                  "accion_bs"=accion, "precio"=precio_actual,"grafico_inflacion"=grafico_inflacion)
+    
+    return(datos)
+    
+  }
+  
+  ################################################################################################################
+  
+  abca=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","abc.a.txt",sep=""),"ABC.A")
+  bnc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bnc.txt",sep=""),"BNC")
+  bou=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bou.txt",sep=""),"BOU")
+  bpv=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bpv.txt",sep=""),"BPV")
+  bvcc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvcc.txt",sep=""),"BVCC")
+  bvl=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvl.txt",sep=""),"BVL")
+  ccr=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ccr.txt",sep=""),"CCR")
+  cgq=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cgq.txt",sep=""),"CGQ")
+  cie=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cie.txt",sep=""),"CIE")
+  crma=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","crm.a.txt",sep=""),"CRM.A")
+  dom=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","dom.txt",sep=""),"DOM")
+  efe=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","efe.txt",sep=""),"EFE")
+  env=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","env.txt",sep=""),"ENV")
+  fnc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fnc.txt",sep=""),"FNC")
+  fvia=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.a.txt",sep=""),"FVI.A")
+  fvib=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.b.txt",sep=""),"FVI.B")
+  gzl=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","gzl.txt",sep=""),"GZL")
+  ivc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ivc.txt",sep=""),"IVC")
+  mpa=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mpa.txt",sep=""),"MPA")
+  mvza=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.a.txt",sep=""),"MVZ.A")
+  mvzb=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.b.txt",sep=""),"MVZ.B")
+  pgr=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","pgr.txt",sep=""),"PGR")
+  ptn=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ptn.txt",sep=""),"PTN")
+  rst=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","rst.txt",sep=""),"RST")
+  rstb=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","rst.txt",sep=""),"RST.B")
+  svs=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","svs.txt",sep=""),"SVS")
+  tdvd=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tdv.d.txt",sep=""),"TDV.D")
+  tpg=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tpg.txt",sep=""),"TPG")
+  ################################################################################################################
+  
+  mercado=data.frame(
+    acciones = c ("ABC.A","BNC","BOU","BPV","BVCC","BVL","CCR","CGQ","CIE","CRM.A","DOM", "EFE","ENV","FNC", 
+                  "FVI.A", "FVI.B","GZL","IVC","MPA","MVZ.A","MVZ.B","PGR","PTN","RST","SVS","TDV.D","TPG"),
+    
+    numero_de_acciones=c( 91666667,
+                          5791930372,
+                          23796748346,
+                          107827475,
+                          29250000,
+                          3647133702,
+                          2834081,
+                          91196788,
+                          485560500,
+                          150000000,
+                          24062500,
+                          700000000,
+                          126923808,
+                          81081000,
+                          1730129521,
+                          10615414833,
+                          24251124,
+                          111025339,
+                          229410000,
+                          60880929,
+                          43880032,
+                          732317516,
+                          152986904,
+                          285642388,
+                          52524376,
+                          26121595,
+                          1188344665),
+    
+    
+    precio=c(abca$precio, bnc$precio, bou$precio, bpv$precio, bvcc$precio, bvl$precio, ccr$precio, 
+             cgq$precio, cie$precio, crma$precio, dom$precio, efe$precio, env$precio, fnc$precio, 
+             fvia$precio, fvib$precio, gzl$precio, ivc$precio, mpa$precio, mvza$precio, mvzb$precio, pgr$precio,
+             ptn$precio, rst$precio, svs$precio, tdvd$precio, tpg$precio)
+    
+    
+  
+  )
+
+
+dolar=datos_dolar()
+precio_dolar=dolar$precio
+mercado[,4]=mercado[,2]*mercado[,3]
+mercado[,5]=mercado[,4]/precio_dolar
+mercado[,6]=mercado[,3]/precio_dolar
+colnames(mercado)=c("Acción","Número de acciones","Precio Bs.","Capitalización Bs","Capitalización $USD", "Precio $USD")
+
+  mercado[,2]=accounting(mercado[,2])
+  mercado[,3]=accounting(mercado[,3])
+  mercado[,4]=accounting(mercado[,4])
+  mercado[,5]=accounting(mercado[,5])
+  mercado[,6]=accounting(mercado[,6])
+
+mercado=mercado[order(mercado[,5], decreasing = TRUE),]
+row.names(mercado) <- NULL
+mercado=mercado[c("Acción","Número de acciones","Precio Bs.", "Precio $USD","Capitalización Bs","Capitalización $USD")]
+capitalizacion_total=kable(mercado) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+return(capitalizacion_total)
+
+}
+#######################################################################################################################
+
+ibc <- function(){
+
+library(readxl)
+
+ibc <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/ibc.xlsx",  col_types = c("date", "numeric", "numeric",  "numeric"))
+ibc=as.data.frame(ibc)
+serie_ibc_1=xts(ibc[,3], as.Date(ibc$fecha))
+serie_ibc_2=xts(ibc[,2], as.Date(ibc$fecha))
+
+grafico_ibc_1=hchart(serie_ibc_1, name = "% Var")
+grafico_ibc_2=hchart(serie_ibc_2, name = "Puntos")
+
+datos=list("grafico_1"=grafico_ibc_1,"grafico_2"=grafico_ibc_2)
+
+return(datos)
+
+}
+
+#######################################################################################################################
+```
+
+ABC.A Bancaribe {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","abc.a.txt",sep=""),"ABC.A")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","abc.a.txt",sep=""),"ABC.A")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+BNC Banco Nacional de Crédito {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+bnc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bnc.txt",sep=""),"BNC")
+bnc$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+
+##############################################################################################
+bnc=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bnc.txt",sep=""),"BNC")
+bnc$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+BOU Banco Occidental de Descuento {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bou.txt",sep=""),"BOU")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bou.txt",sep=""),"BOU")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+BPV Banco Provincial {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bpv.txt",sep=""),"BPV")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bpv.txt",sep=""),"BPV")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+BVCC Bolsa de Valores de Caracas {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvcc.txt",sep=""),"BVCC")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvcc.txt",sep=""),"BVCC")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+BVL Banco de Venezuela {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvl.txt",sep=""),"BVL")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","bvl.txt",sep=""),"BVL")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+CCR Cerámicas Carabobo {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ccr.txt",sep=""),"CCR")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ccr.txt",sep=""),"CCR")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+CGQ Grupo Químico {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cgq.txt",sep=""),"CGQ")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cgq.txt",sep=""),"CGQ")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+CIE Corporación Industrial de Energía {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cie.txt",sep=""),"CIE")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","cie.txt",sep=""),"CIE")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+CRM.A Corimon {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","crm.a.txt",sep=""),"CRM.A")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","crm.a.txt",sep=""),"CRM.A")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+DOM Domínguez & CIA {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","dom.txt",sep=""),"DOM")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","dom.txt",sep=""),"DOM")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+EFE Productos EFE {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","efe.txt",sep=""),"EFE")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","efe.txt",sep=""),"EFE")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+ENV Envases Venezolanos {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","env.txt",sep=""),"ENV")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","env.txt",sep=""),"ENV")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+FNC Fábrica Nacional de Cementos {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fnc.txt",sep=""),"FNC")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fnc.txt",sep=""),"FNC")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+FVI.A Fondo de Valores Inmobiliarios A {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.a.txt",sep=""),"FVI.A")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.a.txt",sep=""),"FVI.A")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+FVI.B Fondo de Valores Inmobiliarios B {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.b.txt",sep=""),"FVI.B")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","fvi.b.txt",sep=""),"FVI.B")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+GZL Grupo Zuliano {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","gzl.txt",sep=""),"GZL")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","gzl.txt",sep=""),"GZL")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+IVC Invaca {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ivc.txt",sep=""),"IVC")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ivc.txt",sep=""),"IVC")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+ 
+MPA Manpa {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mpa.txt",sep=""),"MPA")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mpa.txt",sep=""),"MPA")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+MVZ.A Mercantil A {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.a.txt",sep=""),"MVZ.A")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.a.txt",sep=""),"MVZ.A")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+MVZ.B Mercantil B {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.b.txt",sep=""),"MVZ.B")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","mvz.b.txt",sep=""),"MVZ.B")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+PGR Proagro {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","pgr.txt",sep=""),"PGR")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","pgr.txt",sep=""),"PGR")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+PTN Protinal {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ptn.txt",sep=""),"PTN")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","ptn.txt",sep=""),"PTN")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+
+RST Ron Santa Teresa {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","rst.txt",sep=""),"RST")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","rst.txt",sep=""),"RST")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+
+SVS Sivensa {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","svs.txt",sep=""),"SVS")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","svs.txt",sep=""),"SVS")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+TDV.D Cantv {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tdv.d.txt",sep=""),"TDV.D")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tdv.d.txt",sep=""),"TDV.D")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+TPG Telares Palo Grande {data-navmenu="Acciones"}
+=======================================================================
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en $USD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tpg.txt",sep=""),"TPG")
+accion$grafico_usd
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Cotización de la acción en Bs.
+
+```{r}
+
+##############################################################################################
+accion=datos_accion(accion,paste("C:/Users/analista04/Documents/R/grupointeraval.github.io/","tpg.txt",sep=""),"TPG")
+accion$grafico_bs
+
+```
+
+### Liquidez Monetaria
+
+```{r}
+
+
+liquidez=m2()
+liquidez$grafico
+
+```
+
+
+
+Resumen de Mercado 
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Resumen Diario de Mercado
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+capitalizacion=capitalizacion_de_mercado("C:/Users/analista04/Documents/R/grupointeraval.github.io/diario.dat")
+capitalizacion
+
+```
+
+### Capitalización de Mercado
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+capitalizacion_total=capital()
+capitalizacion_total
+
+```
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Inflación Mensual
+
+```{r}
+datos_inflacion <-function(directorio_archivo_1,directorio_archivo_2){
+  
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  
+  inflacion_mensual= read_excel(directorio_archivo_1, col_types = c("date", "numeric"))
+  inflacion_diaria = read_excel(directorio_archivo_2, col_types = c("date", "numeric"))
+  
+  
+  #Construccion de serie de inflacion mensual
+  serie_inflacion_mensual=xts(inflacion_mensual[,2], inflacion_mensual$Fecha)
+  
+  #Construccion de serie de inflacion diaria
+  serie_inflacion_diaria=xts(inflacion_diaria[,2], inflacion_diaria$Fecha)
+  
+  #Highchart 
+  grafico_inflacion_mensual=hchart(serie_inflacion_mensual,name = "Inflación %")
+  
+  
+  #Dygraph
+  #grafico_inflacion_mensual=dygraph(serie_inflacion_mensual,main="InflaciÃ³n Mensual") %% 
+  #dyAxis(y, label = Bs.) %%
+  #dyRangeSelector() 
+  
+  return(grafico_inflacion_mensual)
+  
+}
+
+inflacion=datos_inflacion("C:/Users/analista04/Documents/R/grupointeraval.github.io/3_inflacion_mensual.xlsx","C:/Users/analista04/Documents/R/grupointeraval.github.io/3_inflacion_diaria.xlsx")
+inflacion
+
+```
+
+### Tipo de Cambio Paralelo
+
+```{r}
+
+datos_dolar <- function(){
+  
+  library(dygraphs)
+  library(xts)
+  library(readr)
+  library(readxl)
+  library(zoo)
+  library(dplyr)
+  library(magrittr)
+  library(highcharter)
+  
+  url <- "https://dxj1e0bbbefdtsyig.woldrssl.net/custom/dolartoday.xlsx"#
+  destfile <- "dolartoday.xlsx" #
+  curl::curl_download(url, destfile)#
+  dolartoday <- read_excel(destfile, col_types = c("text","numeric", "numeric", "text", "numeric","numeric"))#
+  
+  dolarparalelo=as.data.frame(dolartoday[,1:3]) #
+  
+  colnames(dolarparalelo)<-c("Fecha","Bs.","Bs.S") #
+  
+  dolarparalelo[,1]=as.Date(dolarparalelo[,1], format="%m-%d-%Y") #
+  
+  #dolarparalelo <- read_excel(directorio, col_types = c("date", "numeric", "numeric"))
+  
+  dolarparalelo[1:2813,3]=dolarparalelo[1:2813,2]/100000
+  dolarparalelo[2814:nrow(dolarparalelo),3]=dolarparalelo[2814:nrow(dolarparalelo),2]
+  dolar_paralelo=dolarparalelo[,3]
+  
+  serie_dolar_paralelo=xts(dolarparalelo[,3], as.Date(dolarparalelo$Fecha))
+  
+  #Dygraph
+  #grafico_dolar_paralelo=dygraph(serie_dolar_paralelo,main="Dolar Paralelo") %% 
+  #dyAxis(y, label = USDVES) %%
+  #dyRangeSelector(dateWindow = c(2019-01-01, 2019-10-01)) 
+  
+  #Highchart Bs.S
+  grafico_dolar_paralelo=hchart(serie_dolar_paralelo, name = "USD/Bs.")
+  
+  
+  precio_actual=dolar_paralelo[nrow(as.data.frame(dolar_paralelo))]
+  
+  datos=list("grafico"=grafico_dolar_paralelo,"dolar"=dolar_paralelo,"serie"=serie_dolar_paralelo, 
+             precio_actual)
+  
+  return(datos)
+  
+}
+
+dolar=datos_dolar()
+dolar$grafico
+
+```
+
+IBC 
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Índice
+
+```{r}
+
+ibc <- function(){
+
+library(readxl)
+
+ibc <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/ibc.xlsx",  col_types = c("date", "numeric", "numeric",  "numeric"))
+ibc=as.data.frame(ibc)
+serie_ibc_1=xts(ibc[,3], as.Date(ibc$fecha))
+serie_ibc_2=xts(ibc[,2], as.Date(ibc$fecha))
+
+grafico_ibc_1=hchart(serie_ibc_1, name = "% Var")
+grafico_ibc_2=hchart(serie_ibc_2, name = "Puntos")
+
+datos=list("grafico_1"=grafico_ibc_1,"grafico_2"=grafico_ibc_2)
+
+return(datos)
+
+}
+
+ibc=ibc()
+ibc$grafico_2
+
+```
+
+### Variación 
+
+
+```{r}
+
+ibc <- function(){
+
+library(readxl)
+
+ibc <- read_excel("C:/Users/analista04/Documents/R/grupointeraval.github.io/ibc.xlsx",  col_types = c("date", "numeric", "numeric",  "numeric"))
+ibc=as.data.frame(ibc)
+serie_ibc_1=xts(ibc[,3], as.Date(ibc$fecha))
+serie_ibc_2=xts(ibc[,2], as.Date(ibc$fecha))
+
+grafico_ibc_1=hchart(serie_ibc_1, name = "% Var")
+grafico_ibc_2=hchart(serie_ibc_2, name = "Puntos")
+
+datos=list("grafico_1"=grafico_ibc_1,"grafico_2"=grafico_ibc_2)
+
+return(datos)
+
+}
+
+ibc=ibc()
+ibc$grafico_1
+
+```
+
+
+
+Operaciones del día 
+=======================================================================
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+
+### Resumen de Operaciones del día
+
+```{r}
+library(readr)
+library(kableExtra)
+
+operaciones <- read_delim("C:/Users/analista04/Documents/R/grupointeraval.github.io/operaciones.dat", 
+     "|", escape_double = FALSE, col_names = FALSE, 
+     col_types = cols(X1 = col_skip(), X10 = col_skip(), 
+       X8 = col_skip(), X9 = col_skip()), 
+     trim_ws = TRUE)
+
+operaciones=data.frame(operaciones)
+colnames(operaciones)<-c("Cantidad","Título","Casa que compra","Casa que vende", "Precio", "Plazo")
+
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==1,"BANACCI")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==1,"BANACCI")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==2,"VALORES VENCRED")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==2,"VALORES VENCRED")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==4,"ACTIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==4,"ACTIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==10,"CAJA CARACAS")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==10,"CAJA CARACAS")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==12,"INTERBURSA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==12,"INTERBURSA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==14,"FINANCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==14,"FINANCORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==17,"FIVENCA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==17,"FIVENCA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==22,"BOD VALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==22,"BOD VALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==24,"INCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==24,"INCORPO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==32,"MERCOSUR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==32,"MERCOSUR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==33,"CORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==33,"CORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==34,"INTERSEC")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==34,"INTERSEC")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==40,"MAXIMIZA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==40,"MAXIMIZA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==48,"SOLFIN")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==48,"SOLFIN")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==49,"INTERBONO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==49,"INTERBONO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==52,"STATERA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==52,"STATERA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==58,"RATIO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==58,"RATIO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==59,"BANCTRUST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==59,"BANCTRUST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==60,"BESTINVES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==60,"BESTINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==61,"BNH")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==61,"BNH")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==64,"RENDIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==64,"RENDIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==65,"CUADRA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==65,"CUADRA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==66,"VALORALTA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==66,"VALORALTA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==70,"MASVALOR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==70,"MASVALOR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==71,"KOI INVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==71,"KOI INVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==72,"GRUPO INTERAVAL")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==72,"GRUPO INTERAVAL")
+
+row.names(operaciones) <- NULL
+tabla_operaciones=kable(operaciones) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+
+tabla_operaciones
+
+```
+
+
+### Diagrama de operaciones de compra
+
+
+```{r}
+library(readxl)
+library(kableExtra)
+library(highcharter)
+library(dplyr)
+
+
+
+operaciones <- read_delim("C:/Users/analista04/Documents/R/grupointeraval.github.io/operaciones.dat", 
+     "|", escape_double = FALSE, col_names = FALSE, 
+     col_types = cols(X1 = col_skip(), X10 = col_skip(), 
+       X8 = col_skip(), X9 = col_skip()), 
+     trim_ws = TRUE)
+
+operaciones=data.frame(operaciones)
+colnames(operaciones)<-c("Cantidad","Título","Casa que compra","Casa que vende", "Precio", "Plazo")
+
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==1,"BANACCI")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==1,"BANACCI")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==2,"VALORES VENCRED")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==2,"VALORES VENCRED")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==4,"ACTIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==4,"ACTIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==10,"CAJA CARACAS")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==10,"CAJA CARACAS")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==12,"INTERBURSA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==12,"INTERBURSA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==14,"FINANCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==14,"FINANCORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==17,"FIVENCA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==17,"FIVENCA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==22,"BOD VALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==22,"BOD VALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==24,"INCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==24,"INCORPO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==32,"MERCOSUR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==32,"MERCOSUR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==33,"CORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==33,"CORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==34,"INTERSEC")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==34,"INTERSEC")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==40,"MAXIMIZA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==40,"MAXIMIZA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==48,"SOLFIN")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==48,"SOLFIN")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==49,"INTERBONO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==49,"INTERBONO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==52,"STATERA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==52,"STATERA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==58,"RATIO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==58,"RATIO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==59,"BANCTRUST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==59,"BANCTRUST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==60,"BESTINVES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==60,"BESTINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==61,"BNH")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==61,"BNH")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==64,"RENDIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==64,"RENDIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==65,"CUADRA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==65,"CUADRA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==66,"VALORALTA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==66,"VALORALTA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==70,"MASVALOR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==70,"MASVALOR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==71,"KOI INVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==71,"KOI INVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==72,"GRUPO INTERAVAL")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==72,"GRUPO INTERAVAL")
+
+
+
+diagrama_compra=hchart(operaciones, "scatter", hcaes(x = operaciones$`Título`, y = operaciones$Cantidad, group = operaciones$`Casa que compra`))
+
+diagrama_compra
+
+```
+
+### Diagrama de operaciones de venta
+
+
+```{r}
+library(readxl)
+library(kableExtra)
+library(highcharter)
+library(dplyr)
+
+
+
+operaciones <- read_delim("C:/Users/analista04/Documents/R/grupointeraval.github.io/operaciones.dat", 
+     "|", escape_double = FALSE, col_names = FALSE, 
+     col_types = cols(X1 = col_skip(), X10 = col_skip(), 
+       X8 = col_skip(), X9 = col_skip()), 
+     trim_ws = TRUE)
+
+operaciones=data.frame(operaciones)
+colnames(operaciones)<-c("Cantidad","Título","Casa que compra","Casa que vende", "Precio", "Plazo")
+
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==1,"BANACCI")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==1,"BANACCI")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==2,"VALORES VENCRED")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==2,"VALORES VENCRED")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==4,"ACTIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==4,"ACTIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==6,"MERCANTIL MERINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==10,"CAJA CARACAS")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==10,"CAJA CARACAS")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==12,"INTERBURSA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==12,"INTERBURSA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==14,"FINANCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==14,"FINANCORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==17,"FIVENCA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==17,"FIVENCA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==22,"BOD VALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==22,"BOD VALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==24,"INCORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==24,"INCORPO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==32,"MERCOSUR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==32,"MERCOSUR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==33,"CORP")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==33,"CORP")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==34,"INTERSEC")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==34,"INTERSEC")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==40,"MAXIMIZA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==40,"MAXIMIZA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==48,"SOLFIN")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==48,"SOLFIN")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==49,"INTERBONO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==49,"INTERBONO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==52,"STATERA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==52,"STATERA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==58,"RATIO")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==58,"RATIO")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==59,"BANCTRUST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==59,"BANCTRUST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==60,"BESTINVES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==60,"BESTINVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==61,"BNH")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==61,"BNH")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==64,"RENDIVALORES")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==64,"RENDIVALORES")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==65,"CUADRA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==65,"CUADRA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==66,"VALORALTA")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==66,"VALORALTA")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==70,"MASVALOR")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==70,"MASVALOR")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==71,"KOI INVEST")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==71,"KOI INVEST")
+operaciones$`Casa que compra`=replace(operaciones$`Casa que compra`,operaciones$`Casa que compra`==72,"GRUPO INTERAVAL")
+operaciones$`Casa que vende`=replace(operaciones$`Casa que vende`,operaciones$`Casa que vende`==72,"GRUPO INTERAVAL")
+
+
+
+diagrama_venta=hchart(operaciones, "scatter", hcaes(x = operaciones$`Título`, y = operaciones$Cantidad, group = operaciones$`Casa que vende`))
+
+diagrama_venta
+
+```
+
+
+Ranking de Operaciones
+=======================================================================
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+
+### Enero 
+
+```{r}
+library(readxl)
+library(kableExtra)
+
+ranking_enero <- read_excel("ranking_enero.xlsx")
+
+
+row.names(ranking_enero) <- NULL
+tabla_ranking=kable(ranking_enero) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+tabla_ranking
+
+```
+
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Febrero
+
+```{r}
+library(readxl)
+library(kableExtra)
+
+ranking_febrero <- read_excel("ranking_febrero.xlsx")
+
+
+row.names(ranking_febrero) <- NULL
+tabla_ranking=kable(ranking_febrero) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+
+tabla_ranking
+
+```
+
+
